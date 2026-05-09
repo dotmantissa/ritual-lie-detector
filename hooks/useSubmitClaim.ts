@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { decodeEventLog, parseEther } from "viem";
 import { useConfig, useWriteContract } from "wagmi";
-import { waitForTransactionReceipt } from "wagmi/actions";
+import { estimateContractGas, waitForTransactionReceipt } from "wagmi/actions";
 import { LIE_DETECTOR_ABI, LIE_DETECTOR_ADDRESS } from "@/lib/contracts";
 import { encodeLlmInput } from "@/lib/encodeLlmInput";
 import { SYSTEM_PROMPT } from "@/lib/constants";
@@ -24,12 +24,27 @@ export function useSubmitClaim() {
       setStatus("encoding");
       const llmInput = encodeLlmInput(claim, SYSTEM_PROMPT);
       setStatus("awaiting_signature");
+      let gas: bigint;
+      try {
+        const estimated = await estimateContractGas(config, {
+          address: LIE_DETECTOR_ADDRESS,
+          abi: LIE_DETECTOR_ABI,
+          functionName: "submitClaim",
+          args: [claim, llmInput],
+          value: parseEther("0.001")
+        });
+        gas = (estimated * 12n) / 10n; // 20% buffer over estimate.
+      } catch {
+        gas = 2_500_000n; // Fallback cap when RPC can't estimate precompile paths reliably.
+      }
+
       const hash = await writeContractAsync({
         address: LIE_DETECTOR_ADDRESS,
         abi: LIE_DETECTOR_ABI,
         functionName: "submitClaim",
         args: [claim, llmInput],
-        value: parseEther("0.001")
+        value: parseEther("0.001"),
+        gas
       });
       setTxHash(hash);
       setStatus("submitted");
